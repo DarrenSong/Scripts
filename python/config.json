@@ -1,0 +1,24 @@
+{
+  "payday_base": 10,
+  "work_schedule": {
+    "work_start": "9:00", 
+    "work_end": "17:30", 
+    "overtime_end": "20:00",
+    "lunch_time": "11:30",
+    "water_times": ["10:00", "14:00", "16:00"]
+  },
+  "holidays": [
+    {"name": "劳动节", "date": "2026-05-01", "vacation_days": 5},
+    {"name": "端午节", "date": "2026-06-19", "vacation_days": 3},
+    {"name": "中秋节", "date": "2026-09-25", "vacation_days": 3},
+    {"name": "国庆节", "date": "2026-10-01", "vacation_days": 7},
+    {"name": "元旦", "date": "2027-01-01", "vacation_days": 3},
+    {"name": "春节", "date": "2027-02-05", "vacation_days": 9}
+  ],
+  "special_workdays": [
+    "2026-05-09",
+    "2026-06-20",
+    "2026-09-20",
+    "2026-10-10"
+  ]
+}
