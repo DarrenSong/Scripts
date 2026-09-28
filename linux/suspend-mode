@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Switch Linux suspend mode between s2idle and deep.
+# Usage: suspend-mode [status|s2idle|deep] [--persist|--no-persist]
+set -euo pipefail
+
+MEM_SLEEP=/sys/power/mem_sleep
+PERSIST_FILE=/etc/tmpfiles.d/mem-sleep.conf
+NEED_ROOT=0
+MODE=""
+PERSIST=""
+
+usage() {
+  cat <<'EOF'
+Usage: suspend-mode [status|s2idle|deep] [--persist|--no-persist]
+
+  status   Show current mode and persistence (default)
+  s2idle   Use shallow suspend (default on many Intel laptops)
+  deep     Use S3-style deep sleep (usually lower idle power)
+
+  --persist     Also keep the choice after reboot (default when switching)
+  --no-persist  Only change for this boot
+
+Examples:
+  suspend-mode
+  sudo suspend-mode deep
+  sudo suspend-mode s2idle --no-persist
+EOF
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+current_mode() {
+  [[ -r $MEM_SLEEP ]] || die "cannot read $MEM_SLEEP"
+  # Kernel prints: [s2idle] deep   or   s2idle [deep]
+  awk '{
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^\[.+\]$/) {
+        gsub(/[\[\]]/, "", $i)
+        print $i
+        exit
+      }
+    }
+  }' "$MEM_SLEEP"
+}
+
+available_modes() {
+  tr -d '[]' <"$MEM_SLEEP"
+}
+
+persisted_mode() {
+  [[ -f $PERSIST_FILE ]] || { echo ""; return; }
+  # w! /sys/power/mem_sleep - - - - deep
+  awk '/mem_sleep/ {
+    for (i = NF; i >= 1; i--) {
+      if ($i == "s2idle" || $i == "deep") { print $i; exit }
+    }
+  }' "$PERSIST_FILE"
+}
+
+require_mode_supported() {
+  local want=$1
+  if ! grep -qw "$want" <<<"$(available_modes)"; then
+    die "mode '$want' is not supported by this machine (available: $(available_modes))"
+  fi
+}
+
+ensure_root() {
+  if [[ $(id -u) -ne 0 ]]; then
+    exec sudo --preserve-env=PATH -- "$0" "$@"
+  fi
+}
+
+write_mode() {
+  local want=$1
+  require_mode_supported "$want"
+  printf '%s\n' "$want" >"$MEM_SLEEP" || die "failed to write $want to $MEM_SLEEP"
+}
+
+write_persist() {
+  local want=$1
+  require_mode_supported "$want"
+  cat >"$PERSIST_FILE" <<EOF
+# Managed by suspend-mode — apply mem_sleep at boot
+w! $MEM_SLEEP - - - - $want
+EOF
+}
+
+clear_persist() {
+  rm -f "$PERSIST_FILE"
+}
+
+show_status() {
+  local cur avail pers
+  cur=$(current_mode)
+  avail=$(available_modes)
+  pers=$(persisted_mode)
+  echo "current:     $cur"
+  echo "available:   $avail"
+  if [[ -n $pers ]]; then
+    echo "persistent:  $pers  ($PERSIST_FILE)"
+  else
+    echo "persistent:  (none — kernel default after reboot)"
+  fi
+}
+
+# --- parse args ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    status|s2idle|deep)
+      [[ -z $MODE ]] || die "unexpected argument: $1"
+      MODE=$1
+      ;;
+    --persist) PERSIST=yes ;;
+    --no-persist) PERSIST=no ;;
+    *) die "unknown argument: $1 (try --help)" ;;
+  esac
+  shift
+done
+
+MODE=${MODE:-status}
+if [[ $MODE != status ]]; then
+  NEED_ROOT=1
+  [[ -n $PERSIST ]] || PERSIST=yes
+fi
+
+if [[ $NEED_ROOT -eq 1 ]]; then
+  ensure_root "$MODE" $([[ $PERSIST == yes ]] && echo --persist || echo --no-persist)
+fi
+
+case "$MODE" in
+  status)
+    show_status
+    ;;
+  s2idle|deep)
+    write_mode "$MODE"
+    if [[ $PERSIST == yes ]]; then
+      write_persist "$MODE"
+    fi
+    show_status
+    echo "ok: switched to $MODE$([[ $PERSIST == yes ]] && echo ' (persistent)' || echo ' (this boot only)')"
+    ;;
+esac
